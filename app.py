@@ -1,386 +1,117 @@
 import streamlit as st
 import PyPDF2
-import io
-import nltk
 import plotly.graph_objects as go
-import re
-from collections import Counter
-
-# Download NLTK data (needed for keyword extraction)
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', quiet=True)
-
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords', quiet=True)
-
+import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 
-# ==================== PAGE CONFIG ====================
-st.set_page_config(
-    page_title="Grok Resume Tailorer",
-    page_icon="🎯",
-    layout="wide"
-)
+# Download once
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
 
-# ==================== DARK MODE CSS ====================
+# ==================== PAGE & STYLE ====================
+st.set_page_config(page_title="Grok Resume Tailorer", layout="wide")
 st.markdown("""
 <style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stButton>button {
-        background-color: #1f77b4;
-        color: white;
-        border-radius: 10px;
-        padding: 10px 30px;
-        font-size: 18px;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #2a9df4;
-    }
-    h1 {
-        color: #00d4ff;
-    }
-    h2, h3 {
-        color: #4dd4ff;
-    }
+    .main {background-color: #0e1117; color: white;}
+    .stButton>button {background-color: #1f77b4; color: white; border-radius: 12px; padding: 12px 40px; font-size: 18px; font-weight: bold;}
+    .stButton>button:hover {background-color: #2a9df4;}
+    h1, h2, h3 {color: #00d4ff;}
+    .stExpander {background-color: #1a1a2e; border: 1px solid #333;}
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== HELPER FUNCTIONS ====================
+st.title("🎯 Grok Resume Tailorer")
+st.markdown("### Upload your resume + paste any job → get ranked suggestions, tailored version & dark ATS spider chart")
 
-def extract_text_from_pdf(pdf_file):
-    """Extract text from uploaded PDF file"""
-    pdf_reader = PyPDF2.PdfReader(pdf_file)
+# ==================== FUNCTIONS ====================
+def extract_text(file):
+    reader = PyPDF2.PdfReader(file)
     text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text()
+    for page in reader.pages:
+        if page.extract_text():
+            text += page.extract_text() + "\n"
     return text
 
-def extract_keywords(text):
-    """Extract meaningful keywords from text using NLTK"""
-    # Convert to lowercase and tokenize
-    tokens = word_tokenize(text.lower())
-    
-    # Remove stopwords and non-alphabetic tokens
-    stop_words = set(stopwords.words('english'))
-    keywords = [word for word in tokens if word.isalpha() and word not in stop_words and len(word) > 2]
-    
-    return keywords
-
-def calculate_ats_keyword_score(resume_text, jd_text):
-    """Calculate keyword match percentage between resume and JD"""
-    resume_keywords = set(extract_keywords(resume_text))
-    jd_keywords = set(extract_keywords(jd_text))
-    
-    if len(jd_keywords) == 0:
-        return 0
-    
-    # Calculate percentage of JD keywords found in resume
-    matched_keywords = resume_keywords.intersection(jd_keywords)
-    score = (len(matched_keywords) / len(jd_keywords)) * 100
-    
-    return min(score, 100)  # Cap at 100
-
-# ==================== MOCK GROK FUNCTIONS ====================
-# 🔑 TODO: Replace these with real Grok API calls
-# Your Grok API key will go here: GROK_API_KEY = "your-api-key-here"
-
-def mock_grok_suggestions(resume_text, jd_text):
-    """
-    Mock function to generate tailoring suggestions
-    
-    🔑 REAL IMPLEMENTATION:
-    - Use Grok API to analyze resume vs JD
-    - Prompt: "Compare this resume with the job description and provide 5 ranked suggestions..."
-    - Return structured suggestions with impact ranking
-    """
-    suggestions = [
-        {
-            "rank": 1,
-            "suggestion": "Add specific metrics to quantify your achievements",
-            "explanation": "The JD emphasizes results-driven candidates. Adding percentages, dollar amounts, or scale (e.g., 'Increased revenue by 35%') will significantly boost your ATS score and catch recruiters' attention."
-        },
-        {
-            "rank": 2,
-            "suggestion": "Mirror exact keywords from the job description",
-            "explanation": "ATS systems scan for exact keyword matches. Incorporate phrases like those found in the JD (e.g., if JD says 'stakeholder management', use that exact phrase rather than 'working with partners')."
-        },
-        {
-            "rank": 3,
-            "suggestion": "Restructure experience bullets to lead with action verbs",
-            "explanation": "Start each bullet with strong verbs like 'Orchestrated', 'Spearheaded', 'Optimized'. This creates immediate impact and aligns with the JD's dynamic language."
-        },
-        {
-            "rank": 4,
-            "suggestion": "Add a skills section matching JD requirements",
-            "explanation": "Create a dedicated skills section featuring technical and soft skills mentioned in the JD. This provides easy scanning for both ATS and human reviewers."
-        },
-        {
-            "rank": 5,
-            "suggestion": "Tailor your summary/objective to match the role",
-            "explanation": "Your opening statement should mirror the job title and key requirements from the JD. This immediately signals you're a relevant candidate to the ATS algorithm."
-        }
+def mock_suggestions():
+    return [
+        {"rank": 1, "suggestion": "Add A/B testing & funnel optimization keywords", "why": "Appears 6 times in JD — huge ATS boost"},
+        {"rank": 2, "suggestion": "Quantify community value at TRAME", "why": "JD wants 'high-value member growth' — add '0→1000+ members'"},
+        {"rank": 3, "suggestion": "Shorten early sales roles", "why": "Recruiters ignore anything before 2023"},
+        {"rank": 4, "suggestion": "Categorize Skills section", "why": "ATS parses better, humans scan faster"},
+        {"rank": 5, "suggestion": "Fix date formats", "why": "Prevents parsing errors"}
     ]
-    return suggestions
 
-def mock_grok_tailored_resume(resume_text, jd_text):
-    """
-    Mock function to generate tailored resume
-    
-    🔑 REAL IMPLEMENTATION:
-    - Use Grok API with prompt: "Rewrite this resume to align with the job description..."
-    - Emphasize: "Keep all facts 100% truthful, only rephrase and reorganize"
-    - Request natural keyword integration
-    """
-    # This is a simplified mock - real version would intelligently rewrite
-    tailored = f"""TAILORED RESUME (Mock Version)
-    
-📌 PROFESSIONAL SUMMARY
-Results-driven professional with proven expertise in the key areas highlighted in your target role. Demonstrated success in stakeholder management, cross-functional collaboration, and data-driven decision making. Ready to bring quantifiable impact to your next position.
+def mock_tailored():
+    return """LUIS LANDEROS
+Head of Growth | 11× DAU & 30× Volume Growth via User Acquisition & Funnel Optimization
 
-💼 PROFESSIONAL EXPERIENCE
+• Current: 11× DAU (9→100+, peaks 212) and 30× volume ($112k→$3.4M) in 7 months
+• Built 0→1 ambassador & referral systems driving 35–40% of all growth
+• Cut CAC 45% and lifted Week-1 retention 2.2× via AI-powered onboarding
+• Daily AI force-multiplier (copy, creatives, A/B testing, funnel optimization)
 
-Senior Analyst | Tech Company Inc. | 2021 - Present
-• Spearheaded process optimization initiatives resulting in 35% efficiency improvement and $250K annual cost savings
-• Orchestrated stakeholder management across 5 departments, aligning strategic objectives with business outcomes
-• Leveraged advanced analytics and data visualization to drive executive decision-making
-• Mentored team of 4 junior analysts, improving team productivity by 28%
+HEAD OF GROWTH (Remote) | April 2025 – Present
+Vyper – Privacy-first investment platform
+• Led user acquisition and funnel optimization to 11× DAU and 30× platform volume
+• Designed ambassador + referral engine driving 35–40% of new users and deposits
+• Reduced CAC 45% and lifted Week-1 retention 2.2× via onboarding redesign and A/B testing
+• Integrated AI workflows accelerating experimentation velocity 3–4×
+• Partnered with 45+ tier-1 creators and communities
 
-Business Analyst | Solutions Corp | 2019 - 2021
-• Optimized workflow processes through requirements gathering and agile methodologies
-• Collaborated with cross-functional teams to deliver 12+ projects on time and under budget
-• Implemented dashboard reporting system increasing operational visibility by 40%
-
-🎓 EDUCATION
-Bachelor of Science in Business Analytics | State University | 2019
-• Relevant Coursework: Data Analytics, Business Intelligence, Statistics
-
-🛠️ SKILLS
-Technical: SQL, Python, Tableau, Excel (Advanced), Power BI, Data Analysis
-Soft Skills: Stakeholder Management, Cross-functional Collaboration, Strategic Planning, Problem Solving
-
-📊 CERTIFICATIONS
-• Certified Business Analysis Professional (CBAP)
-• Project Management Professional (PMP)
-
----
-✅ This resume has been tailored to match your job description with naturally integrated keywords while maintaining 100% factual accuracy.
+[Full tailored resume continues...]
 """
-    return tailored
 
-def mock_ats_scores(is_tailored=False):
-    """
-    Mock function for 6 ATS scores (keyword score is calculated separately)
-    
-    🔑 REAL IMPLEMENTATION:
-    - Use Grok API to analyze resume quality
-    - Prompt: "Analyze this resume and rate it on: Skills Hit, Experience Depth, etc."
-    - Return scores 0-100 for each category
-    """
-    if is_tailored:
-        return {
-            "Skills Hit": 92,
-            "Experience Depth": 88,
-            "Quantitative Impact": 95,
-            "Title Fit": 90,
-            "Education Match": 85,
-            "Parseability": 93
-        }
-    else:
-        return {
-            "Skills Hit": 62,
-            "Experience Depth": 68,
-            "Quantitative Impact": 45,
-            "Title Fit": 58,
-            "Education Match": 75,
-            "Parseability": 72
-        }
+def ats_scores():
+    return [88, 92, 96, 99, 94, 85, 98]  # Real version will calculate from text
 
-# ==================== MAIN APP ====================
-
-st.title("🎯 Grok Resume Tailorer")
-st.markdown("### Transform your resume to match any job description using AI")
-
-# Create two columns for inputs
+# ==================== UI ====================
 col1, col2 = st.columns(2)
-
 with col1:
-    st.markdown("#### 📄 Upload Your Resume")
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
-    
+    resume = st.file_uploader("📄 Upload Resume PDF", type="pdf")
 with col2:
-    st.markdown("#### 📋 Paste Job Description")
-    job_description = st.text_area("Enter the full job description", height=200, 
-                                   placeholder="Paste the complete job posting here...")
+    jd = st.text_area("📋 Paste Job Description", height=180)
 
-st.markdown("---")
-
-# Analyze button
 if st.button("🚀 Analyze & Tailor Resume", use_container_width=True):
-    
-    if uploaded_file is None:
-        st.error("❌ Please upload a resume PDF first!")
-    elif not job_description.strip():
-        st.error("❌ Please paste a job description!")
+    if not resume:
+        st.error("Please upload your resume PDF")
+    elif not jd.strip():
+        st.error("Please paste a job description")
     else:
-        with st.spinner("🤖 AI is analyzing and tailoring your resume..."):
+        with st.spinner("Grok is analyzing..."):
+            text = extract_text(resume)
             
-            # Extract resume text
-            resume_text = extract_text_from_pdf(uploaded_file)
+            # Show results
+            st.success("Done! Here are your results:")
             
-            # Store in session state
-            st.session_state['resume_text'] = resume_text
-            st.session_state['jd_text'] = job_description
+            # Suggestions
+            st.subheader("Top 5 Ranked Suggestions")
+            for s in mock_suggestions():
+                with st.expander(f"#{s['rank']} — {s['suggestion']}"):
+                    st.write(s['why'])
             
-            # Generate suggestions
-            suggestions = mock_grok_suggestions(resume_text, job_description)
-            st.session_state['suggestions'] = suggestions
+            # Tailored Resume
+            st.subheader("Your Tailored Resume")
+            tailored = mock_tailored()
+            st.download_button("📥 Download Tailored Resume", tailored, "Tailored_Resume.txt")
+            st.text_area("Copy-paste ready", tailored, height=500)
             
-            # Generate tailored resume
-            tailored_resume = mock_grok_tailored_resume(resume_text, job_description)
-            st.session_state['tailored_resume'] = tailored_resume
+            # Spider Chart
+            st.subheader("Interactive ATS Spider Chart")
+            scores = ats_scores()
+            labels = ["Keyword Match", "Skills", "Experience", "Quant Impact", "Title Fit", "Education", "Parseability"]
             
-            # Calculate ATS scores
-            # Original scores
-            original_keyword_score = calculate_ats_keyword_score(resume_text, job_description)
-            original_other_scores = mock_ats_scores(is_tailored=False)
+            fig = go.Figure()
+            fig.add_trace(go.Scatterpolar(r=scores, theta=labels, fill='toself', name='Your Resume', line_color='#00d4ff'))
+            fig.add_trace(go.Scatterpolar(r=[70]*7, theta=labels, name='Average Applicant', line=dict(color='gray', dash='dot')))
+            fig.update_layout(polar=dict(radialaxis=dict(range=[0,100]), bgcolor='#0e1117'),
+                              paper_bgcolor='#0e1117', font_color="white", title="Your ATS Score vs Average")
+            st.plotly_chart(fig, use_container_width=True)
             
-            # Tailored scores
-            tailored_keyword_score = calculate_ats_keyword_score(tailored_resume, job_description)
-            tailored_other_scores = mock_ats_scores(is_tailored=True)
-            
-            st.session_state['original_scores'] = {
-                "Keyword Match": original_keyword_score,
-                **original_other_scores
-            }
-            st.session_state['tailored_scores'] = {
-                "Keyword Match": tailored_keyword_score,
-                **tailored_other_scores
-            }
-        
-        st.success("✅ Analysis complete!")
+            st.success("Overall ATS Score: 93/100 — Top 3% of applicants!")
+            st.balloons()
 
-# Display results if they exist
-if 'suggestions' in st.session_state:
-    
-    st.markdown("---")
-    st.markdown("## 💡 Top 5 Tailoring Suggestions")
-    
-    for sug in st.session_state['suggestions']:
-        with st.expander(f"🏆 #{sug['rank']} - {sug['suggestion']}", expanded=(sug['rank']==1)):
-            st.markdown(f"**Why this matters:** {sug['explanation']}")
-    
-    st.markdown("---")
-    st.markdown("## 📊 ATS Score Comparison")
-    
-    # Create radar chart
-    categories = list(st.session_state['original_scores'].keys())
-    original_values = list(st.session_state['original_scores'].values())
-    tailored_values = list(st.session_state['tailored_scores'].values())
-    average_values = [70] * len(categories)  # Industry average
-    
-    fig = go.Figure()
-    
-    # Add traces
-    fig.add_trace(go.Scatterpolar(
-        r=original_values,
-        theta=categories,
-        fill='toself',
-        name='Current Resume',
-        line=dict(color='#ff4444', width=2),
-        fillcolor='rgba(255, 68, 68, 0.2)'
-    ))
-    
-    fig.add_trace(go.Scatterpolar(
-        r=tailored_values,
-        theta=categories,
-        fill='toself',
-        name='Tailored Resume',
-        line=dict(color='#00d4ff', width=2),
-        fillcolor='rgba(0, 212, 255, 0.2)'
-    ))
-    
-    fig.add_trace(go.Scatterpolar(
-        r=average_values,
-        theta=categories,
-        fill=None,
-        name='Industry Average',
-        line=dict(color='#888888', width=2, dash='dot')
-    ))
-    
-    fig.update_layout(
-        polar=dict(
-            bgcolor='#0e1117',
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100],
-                gridcolor='#333333',
-                tickfont=dict(color='#ffffff')
-            ),
-            angularaxis=dict(
-                gridcolor='#333333',
-                tickfont=dict(color='#ffffff', size=12)
-            )
-        ),
-        showlegend=True,
-        paper_bgcolor='#0e1117',
-        plot_bgcolor='#0e1117',
-        font=dict(color='#ffffff'),
-        height=500,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.2,
-            xanchor="center",
-            x=0.5
-        )
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Score summary
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        avg_original = sum(original_values) / len(original_values)
-        st.metric("🔴 Current Score", f"{avg_original:.1f}%")
-    
-    with col2:
-        avg_tailored = sum(tailored_values) / len(tailored_values)
-        improvement = avg_tailored - avg_original
-        st.metric("🔵 Tailored Score", f"{avg_tailored:.1f}%", 
-                 delta=f"+{improvement:.1f}%")
-    
-    with col3:
-        st.metric("⚪ Industry Average", "70.0%")
-    
-    st.markdown("---")
-    st.markdown("## ✨ Your Tailored Resume")
-    
-    st.text_area("Preview", st.session_state['tailored_resume'], 
-                height=400, disabled=True)
-    
-    # Download button
-    st.download_button(
-        label="📥 Download Tailored Resume",
-        data=st.session_state['tailored_resume'],
-        file_name="tailored_resume.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
+else:
+    st.info("Upload your resume + paste any job description to start")
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666666;'>
-    <p>🤖 Powered by AI | Built with Streamlit | Made for Job Seekers</p>
-    <p style='font-size: 12px;'>💡 Tip: Always review and personalize your tailored resume before sending!</p>
-</div>
-""", unsafe_allow_html=True)
+st.caption("Built with ❤️ using Streamlit • Mock mode (real Grok coming soon)")
